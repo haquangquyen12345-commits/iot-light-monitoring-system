@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HUST IoT Dashboard - Realtime Light Monitoring</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Inter', sans-serif; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .stat-value { font-size: 2.5rem; font-weight: 700; }
+        .log-table { max-height: 300px; overflow-y: auto; }
+        .led-indicator { width: 20px; height: 20px; border-radius: 50%; background: #ccc; display: inline-block; }
+        .led-on { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+    </style>
+</head>
+<body>
+
+<div class="container py-4">
+    <!-- Header -->
+    <div class="card p-3 mb-4 d-flex flex-row justify-content-between align-items-center">
+        <div>
+            <h4 class="text-primary fw-bold mb-0"><i class="bi bi-cpu-fill"></i> HUST LAB MONITORING</h4>
+            <small class="text-muted">PostgreSQL + FastAPI Real-time System</small>
+        </div>
+        <div id="connStatus" class="badge bg-secondary p-2">Đang kết nối...</div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div id="luxCard" class="card p-3 text-center border-start border-primary border-4">
+                <small class="text-uppercase fw-bold text-muted">Ánh sáng</small>
+                <div id="luxVal" class="stat-value text-primary">--</div>
+                <small>Lux</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 text-center border-start border-success border-4">
+                <small class="text-uppercase fw-bold text-muted">Trạng thái</small>
+                <div id="statusVal" class="h2 fw-bold text-success my-2">--</div>
+                <small id="lastUpdate">--:--:--</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 text-center border-start border-danger border-4">
+                <small class="text-uppercase fw-bold text-muted">Cực đại (Max)</small>
+                <div id="maxVal" class="h2 fw-bold text-danger my-2">0</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 text-center border-start border-warning border-4">
+                <small class="text-uppercase fw-bold text-muted">Cực tiểu (Min)</small>
+                <div id="minVal" class="h2 fw-bold text-warning my-2">1000</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter & Search Section -->
+    <div class="card p-4 mb-4 border-top border-primary border-4 shadow-sm">
+        <h6 class="fw-bold mb-3"><i class="bi bi-search"></i> TRUY XUẤT & BỘ LỌC DATABASE</h6>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text bg-primary text-white">=</span>
+                    <input type="number" id="inSearch" class="form-control" placeholder="Tìm bằng">
+                    <button class="btn btn-primary" onclick="handleSearch()">Tìm</button>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text bg-warning text-dark">&lt;</span>
+                    <input type="number" id="inFilterLess" class="form-control" placeholder="Tìm nhỏ hơn">
+                    <button class="btn btn-warning text-dark" onclick="handleFilterLess()">Lọc</button>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text bg-danger text-white">&gt;</span>
+                    <input type="number" id="inFilterGreater" class="form-control" placeholder="Tìm lớn hơn">
+                    <button class="btn btn-danger" onclick="handleFilterGreater()">Lọc</button>
+                </div>
+            </div>
+            
+            <div class="col-12 text-end">
+                <button class="btn btn-sm btn-outline-secondary" onclick="clearResults()">Đóng bảng kết quả</button>
+            </div>
+        </div>
+
+        <div id="resArea" class="mt-3 d-none">
+            <hr>
+            <p class="small">Kết quả: <span id="resCount" class="badge bg-info">0</span> bản ghi</p>
+            <div class="table-responsive" style="max-height: 200px;">
+                <table class="table table-sm table-hover table-bordered">
+                    <thead class="table-light"><tr><th>Thời gian</th><th>Giá trị</th></tr></thead>
+                    <tbody id="resBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts & Logs -->
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div class="card p-4 h-100">
+                <h6 class="fw-bold mb-3"><i class="bi bi-graph-up"></i> BIỂU ĐỒ THỜI GIAN THỰC</h6>
+                <canvas id="luxChart"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card p-4 h-100">
+                <h6 class="fw-bold mb-3"><i class="bi bi-list-ul"></i> NHẬT KÝ HỆ THỐNG</h6>
+                <div class="log-table border rounded p-2">
+                    <table class="table table-sm text-center mb-0">
+                        <thead><tr><th>STT</th><th>Giờ</th><th>Lux</th></tr></thead>
+                        <tbody id="tableBody"></tbody>
+                    </table>
+                </div>
+                <div class="mt-3 border-top pt-3">
+                    <h6 class="fw-bold text-success mb-2"><i class="bi bi-file-earmark-excel"></i> XUẤT CSV THEO THỜI GIAN</h6>
+                    <div class="row g-2 align-items-center">
+                        <div class="col-md-5">
+                            <small class="text-muted">Từ giờ:</small>
+                            <input type="datetime-local" id="startTime" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-5">
+                            <small class="text-muted">Đến giờ:</small>
+                            <input type="datetime-local" id="endTime" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-2 mt-4 text-end">
+                            <button class="btn btn-sm btn-success w-100" onclick="exportCustomCSV()">Tải</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Sử dụng địa chỉ Local HTTP cho Backend FastAPI
+    const API_BASE = "http://127.0.0.1:8000/api";
+    let history = [];
+    let maxLux = 0; let minLux = 1000; let stt = 0;
+
+    // Chart.js init
+    const ctx = document.getElementById('luxChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: { 
+            labels: [], 
+            datasets: [{ 
+                label: 'Lux', 
+                data: [], 
+                borderColor: '#0d6efd', 
+                tension: 0.4, 
+                fill: true, 
+                backgroundColor: 'rgba(13,110,253,0.1)',
+                pointRadius: 2
+            }] 
+        },
+        options: { 
+            responsive: true, 
+            plugins: { 
+                legend: { display: false } 
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        autoSkip: true,
+                        maxTicksLimit: 10,
+                        maxRotation: 0
+                    }
+                }
+            }
+        }
+    });
+
+    async function updateDashboard() {
+        try {
+            const res = await fetch(`${API_BASE}/data`);
+            const data = await res.json();
+            if (data.length === 0) return;
+
+            const latest = data[data.length - 1];
+            const lux = latest.lux;
+            const time = latest.timestamp;
+
+            if (history.length > 0 && history[history.length-1].time === time) return;
+
+            document.getElementById('connStatus').className = "badge bg-success p-2";
+            document.getElementById('connStatus').innerText = "Máy chủ: OK";
+            document.getElementById('luxVal').innerText = lux;
+            document.getElementById('lastUpdate').innerText = "Cập nhật: " + time;
+
+            const statusEl = document.getElementById('statusVal');
+            if (lux > 400) {
+                statusEl.innerText = "Quá sáng";
+                statusEl.className = "h2 fw-bold text-danger my-2";
+            } else {
+                statusEl.innerText = "Bình thường";
+                statusEl.className = "h2 fw-bold text-success my-2";
+            }
+
+            if (lux > maxLux) maxLux = lux; if (lux < minLux) minLux = lux;
+            document.getElementById('maxVal').innerText = maxLux;
+            document.getElementById('minVal').innerText = minLux;
+
+            chart.data.labels.push(time);
+            chart.data.datasets[0].data.push(lux);
+            chart.update('none');
+
+            stt++;
+            history.push({time, val: lux});
+            const row = `<tr><td>${stt}</td><td>${time}</td><td class="fw-bold">${lux}</td></tr>`;
+            document.getElementById('tableBody').insertAdjacentHTML('afterbegin', row);
+
+        } catch (e) {
+            document.getElementById('connStatus').className = "badge bg-danger p-2";
+            document.getElementById('connStatus').innerText = "Mất kết nối!";
+        }
+    }
+
+    async function handleSearch() {
+        const lux = document.getElementById('inSearch').value;
+        if (!lux) return;
+        const res = await fetch(`${API_BASE}/search?lux=${lux}`);
+        const data = await res.json();
+        renderSearch(data);
+    }
+
+    async function handleFilterLess() {
+        const max = document.getElementById('inFilterLess').value;
+        if (!max) return;
+        const res = await fetch(`${API_BASE}/filter?max_lux=${max}`);
+        const data = await res.json();
+        renderSearch(data);
+    }
+
+    async function handleFilterGreater() {
+        const min = document.getElementById('inFilterGreater').value;
+        if (!min) return;
+        const res = await fetch(`${API_BASE}/filter_greater?min_lux=${min}`);
+        const data = await res.json();
+        renderSearch(data);
+    }
+
+    function renderSearch(data) {
+        const area = document.getElementById('resArea');
+        const body = document.getElementById('resBody');
+        area.classList.remove('d-none');
+        body.innerHTML = "";
+        document.getElementById('resCount').innerText = data.length;
+        data.forEach(item => {
+            body.innerHTML += `<tr><td>${item.timestamp}</td><td>${item.lux}</td></tr>`;
+        });
+    }
+
+    function clearResults() { document.getElementById('resArea').classList.add('d-none'); }
+
+    async function exportCustomCSV() {
+        const start = document.getElementById('startTime').value;
+        const end = document.getElementById('endTime').value;
+
+        if (!start || !end) {
+            alert("Vui lòng chọn đầy đủ thời gian bắt đầu và kết thúc!");
+            return;
+        }
+        if (new Date(start) > new Date(end)) {
+            alert("Thời gian bắt đầu không được lớn hơn thời gian kết thúc!");
+            return;
+        }
+
+        try {
+            const startStr = start.replace('T', ' ') + ':00';
+            const endStr = end.replace('T', ' ') + ':59';
+            
+            const res = await fetch(`${API_BASE}/export?start_time=${startStr}&end_time=${endStr}`);
+            const data = await res.json();
+
+            if (data.length === 0) {
+                alert("Không có dữ liệu nào được ghi nhận trong khoảng thời gian này!");
+                return;
+            }
+
+            let csv = "STT,Thoi Gian,Lux\n";
+            data.forEach((item, index) => {
+                csv += `${index + 1},${item.timestamp},${item.lux}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; 
+            a.download = `Data_Lux_${start.replace('T','_')}.csv`; 
+            a.click();
+            
+        } catch (error) {
+            alert("Lỗi khi tải dữ liệu từ máy chủ. Vui lòng kiểm tra lại mạng!");
+        }
+    }
+
+    setInterval(updateDashboard, 3000);
+</script>
+</body>
+</html>
