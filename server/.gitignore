@@ -7,13 +7,11 @@ Thumbs.db
 *.swp
 
 # ==========================================
-# Thư mục build chứa file nhị phân dịch ra (rất nặng, không push)
 firmware/build/
 firmware/sdkconfig.old
 firmware/managed_components/
 
 # ==========================================
-# Bộ đệm Python & Môi trường ảo (Virtual Environment)
 __pycache__/
 *.pyc
 *.pyo
